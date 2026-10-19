@@ -291,6 +291,7 @@ let flushing=false,flushTimer=null,lastPull=0;
 function setSync(s){const el=$('#sync');if(el){el.dataset.s=s;el.parentElement.title={local:'מצב מקומי (לא מחובר לגיליון)',ok:'מסונכרן',pending:'ממתין לסנכרון',syncing:'מסנכרן…',error:'שגיאת סנכרון — לחץ לנסות שוב'}[s]}}
 /* transport: normal POST (Chrome, Android). If the browser blocks it (Safari on iPhone: "Load failed"),
    switch to safe mode: JSONP for small requests, and no-cors POST + collecting the result via JSONP for big ones. */
+const APP_VER='2026-10-20 (iPhone fix)';
 let SAFE=LS.get('fin_safe',false);
 const apiErr=m=>{const e=new Error(m||'error');e.api=true;return e};
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -840,7 +841,7 @@ function openSettings(){
     ${fld('כתובת Web App',`<input class="input ltr" id="cfUrl" value="${esc(CONF.url)}" placeholder="https://script.google.com/macros/s/.../exec">`)}
     ${fld('סיסמה (SECRET מהסקריפט)',`<input class="input ltr" id="cfKey" type="password" value="${esc(CONF.key)}">`)}
     <div class="btns" style="margin-top:10px"><button class="btn primary" onclick="connect()">חיבור ובדיקה</button>${CONF.url?'<button class="btn" onclick="disconnect()">ניתוק</button>':''}</div>
-    <div class="hint" id="cfMsg">${CONF.url?'מחובר. ממתינות לסנכרון: '+QUEUE.length:'כרגע הנתונים נשמרים רק בדפדפן הזה. התחבר לגיליון כדי לסנכרן בין טלפון למחשב.'}</div></div>
+    <div class="hint" id="cfDiag" style="white-space:pre-wrap;direction:rtl;font-family:monospace;font-size:12px"></div><div class="hint">גרסה: ${APP_VER}</div><div class="hint" id="cfMsg">${CONF.url?'מחובר. ממתינות לסנכרון: '+QUEUE.length:'כרגע הנתונים נשמרים רק בדפדפן הזה. התחבר לגיליון כדי לסנכרן בין טלפון למחשב.'}</div></div>
    <div class="panel"><h3>ייבוא / גיבוי</h3><div class="btns"><label class="btn primary">ייבוא מקובץ JSON<input type="file" accept=".json,application/json" hidden onchange="importJSON(this.files[0])"></label><button class="btn" onclick="exportJSON()">הורדת גיבוי</button></div>
     <div class="hint">לייבוא נתוני 2026 מהטבלה — בחר את הקובץ finance-2026-import.json. ייבוא חוזר של אותו קובץ לא יוצר כפילויות.</div></div>
    <div class="panel"><h3>קטגוריות הוצאה</h3><datalist id="grpList">${groups.map(g=>`<option value="${esc(g)}">`).join('')}</datalist>
@@ -881,7 +882,13 @@ async function connect(){
       if(remoteHas&&hasLocalData()&&!confirm('בגיליון כבר יש נתונים. להחליף את הנתונים בדפדפן הזה בנתוני הגיליון?\n(ביטול = לאחד: הנתונים המקומיים יתווספו לגיליון)'))QUEUE=uploadAllOps();else QUEUE=[];
       saveLocal();await pull();msg.textContent='מחובר ומסונכרן.'}
     render();
-  }catch(e){msg.textContent='החיבור נכשל: '+e.message+(e.message==='unauthorized'?' (סיסמה שגויה)':'')}}
+  }catch(e){msg.textContent='החיבור נכשל: '+e.message+(e.message==='unauthorized'?' (סיסמה שגויה)':'');diagnose(url,key)}}
+async function diagnose(url,key){
+  const out=$('#cfDiag');if(!out)return;out.textContent='מריץ בדיקה…';const L=[];
+  L.push('גרסת אפליקציה: '+APP_VER);L.push('דפדפן: '+(/iPhone|iPad/.test(navigator.userAgent)?'iPhone':'')+' '+(/CriOS/.test(navigator.userAgent)?'Chrome':/Safari/.test(navigator.userAgent)?'Safari':'')+' · '+location.origin);
+  try{const r=await fetch(url,{method:'POST',body:JSON.stringify({key,action:'ping'})});const t=await r.text();L.push('1. בקשה רגילה: '+t.slice(0,60))}catch(e){L.push('1. בקשה רגילה: נחסמה ('+e.message+')')}
+  try{const r=await jsonp(url,{key,action:'ping'},15000);L.push('2. בקשה חלופית: '+JSON.stringify(r).slice(0,60))}catch(e){L.push('2. בקשה חלופית: נכשלה ('+e.message+')')}
+  out.textContent=L.join('\n')}
 function disconnect(){if(!confirm('לנתק מהגיליון? הנתונים יישארו בדפדפן ובגיליון.'))return;CONF={url:'',key:''};QUEUE=[];LS.set('fin_conf',CONF);saveLocal();setSync('local');openSettings()}
 function exportJSON(){const b=new Blob([JSON.stringify({exported:new Date().toISOString(),data:DB})],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='finance-backup-'+today()+'.json';a.click()}
 function importJSON(f){if(!f)return;const rd=new FileReader();rd.onload=()=>{try{const j=JSON.parse(rd.result),d=j.data||j;
