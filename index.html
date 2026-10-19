@@ -289,9 +289,33 @@ function groupsOf(cats){const g=[];cats.forEach(c=>{const k=c.group||'כללי';
 /* ============ sync with Google Sheets ============ */
 let flushing=false,flushTimer=null,lastPull=0;
 function setSync(s){const el=$('#sync');if(el){el.dataset.s=s;el.parentElement.title={local:'מצב מקומי (לא מחובר לגיליון)',ok:'מסונכרן',pending:'ממתין לסנכרון',syncing:'מסנכרן…',error:'שגיאת סנכרון — לחץ לנסות שוב'}[s]}}
+/* transport: normal POST (Chrome, Android). If the browser blocks it (Safari on iPhone: "Load failed"),
+   switch to safe mode: JSONP for small requests, and no-cors POST + collecting the result via JSONP for big ones. */
+let SAFE=LS.get('fin_safe',false);
+const apiErr=m=>{const e=new Error(m||'error');e.api=true;return e};
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+function jsonp(url,params,timeout=45000){return new Promise((res,rej)=>{
+  const cb='__cb'+Date.now().toString(36)+Math.random().toString(36).slice(2,7),s=document.createElement('script');let done=false;
+  const end=()=>{done=true;delete window[cb];s.remove();clearTimeout(t)};
+  const t=setTimeout(()=>{if(!done){end();rej(new Error('אין תשובה מהגיליון (timeout)'))}},timeout);
+  window[cb]=d=>{end();res(d)};
+  s.onerror=()=>{if(!done){end();rej(new Error('Load failed'))}};
+  s.src=url+(url.includes('?')?'&':'?')+'cb='+cb+'&p='+encodeURIComponent(JSON.stringify(params));document.head.appendChild(s)})}
+async function safeApi(url,body){
+  let j;
+  if(encodeURIComponent(JSON.stringify(body)).length<6500)j=await jsonp(url,body);
+  else{
+    const rid=uid();
+    try{await fetch(url,{method:'POST',mode:'no-cors',body:JSON.stringify(Object.assign({rid},body))})}catch(e){}
+    for(let i=0;i<45&&!j;i++){await sleep(i<4?900:1600);const r=await jsonp(url,{key:body.key,action:'result',rid});if(!r.ok)throw apiErr(r.error);if(r.pending===false)j=r.result}
+    if(!j)throw new Error('אין תשובה מהגיליון (timeout)')}
+  if(!j.ok)throw apiErr(j.error);return j}
 async function api(payload,url,key){
-  const r=await fetch(url||CONF.url,{method:'POST',body:JSON.stringify(Object.assign({key:key??CONF.key},payload))});
-  const j=await r.json();if(!j.ok)throw new Error(j.error||'error');return j}
+  url=url||CONF.url;const body=Object.assign({key:key??CONF.key},payload);
+  if(!SAFE){
+    try{const r=await fetch(url,{method:'POST',body:JSON.stringify(body)});const j=await r.json();if(!j.ok)throw apiErr(j.error);return j}
+    catch(e){if(e.api)throw e;SAFE=true;LS.set('fin_safe',true)}}
+  return safeApi(url,body)}
 function scheduleFlush(){clearTimeout(flushTimer);flushTimer=setTimeout(flush,500)}
 async function flush(){
   if(!CONF.url){setSync('local');return}
@@ -876,4 +900,3 @@ if(CONF.url){setSync(QUEUE.length?'pending':'ok');pull()}else setSync('local');
 </script>
 </body>
 </html>
-
